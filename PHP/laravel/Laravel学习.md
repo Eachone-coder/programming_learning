@@ -1082,3 +1082,7 @@
 
 37. 
 
+```shell
+php -S localhost:8888 -t public
+```
+

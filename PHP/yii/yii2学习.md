@@ -301,7 +301,9 @@ class DownloadJob extends BaseObject implements JobInterface
 
 <img src="../../image/Snipaste_2019-11-06_11-08-33.png" style="zoom:80%;" />
 
-
+>  在使用队列时出现：Exception 'TypeError' with message 'Argument 1 passed to Symfony\Component\Process\Process::__construct() must be of the type array, string given, called in D:\phpStudy\WWW\advanced\basic\vendor\yiisoft\yii2-queue\src\cli\Command.php on line 167' 
+>
+> 解决：看一下的\vendor\yiisoft\yii2-queue\src\cli\Command.php 的 167 行左右的`$cmd` 是数组还是字符串，如果是字符串请更新到最新版本
 
 ## Yii2中事务的使用
 
@@ -341,3 +343,196 @@ try {
     throw $e;
 }
 ```
+
+
+
+## Yii2 ActiveRecord多表关联以及多表关联搜索的实现
+
+[参考资料](http://www.manks.top/yii2_many_ar_relation_search.html)
+
+在Yii的视图小部件GridView使用中有这样一个问题：
+
+我们有一张用户学习周期表user_study和一张用户渠道表order，两张数据表通过user_study.id和order.study_id进行一对一关联。现需要在user_study列表展示order表的开票状态invoice_status。
+
+在UserSearch中使用innerJoin连接后发现出现了  N+1 问题 （可参照  [Laravel 的 N+1 问题](https://learnku.com/laravel/t/15077/what-is-the-n1-problem-and-how-to-solve-the-n1-problem-in-laravel) ）
+
+<img src="../../image/Snipaste_2019-11-12_14-22-48.jpg" style="zoom:67%;" />
+
+N+1问题展示：
+
+<img src="../../image/Snipaste_2019-11-12_14-25-21.jpg" style="zoom:70%;" />
+
+问题优化：
+
+因为在数据模型中已定义关联查询，所以使用`joinWith()`解决该问题，代码如下：
+
+<img src="../../image/Snipaste_2019-11-12_14-28-58.jpg" style="zoom:80%;" />
+
+观察此时的debug情况：
+
+<img src="../../image/Snipaste_2019-11-12_14-30-10.jpg" style="zoom:80%;" />
+
+
+
+## Yii2 使用batchInsert 批量插入数据 
+
+注意点： batchInsert是不走Save()相关事件的,包括数据验证。 在使用batchInsert一次性批量添加数据,需要将数据处理好再入库了。
+
+在批量执行的过程中使用异常捕获，如果某一条数据出现异常，会导致中断插入过程，之后的数据无法批量插入，但在这条异常数据之前的数据是已经插入到数据库中，事务回滚仿佛不生效
+
+<img src="../../image/Snipaste_2019-11-14_10-29-17.jpg" style="zoom:100%;" />
+
+
+
+## Yii2使用json查询
+
+[参考链接](https://www.cnblogs.com/ooo0/p/9309277.html)
+
+关于使用`JSON_CONTAINS`函数的报错：
+
+如
+
+```mysq
+SELECT * FROM `news` WHERE JSON_CONTAINS(category_id,'["2"]')
+```
+
+当数据库数据中的`category_id`某条数据为空时，数据查询会抛出异常：
+
+> # Database Exception – [yii\db\Exception](http://www.yiiframework.com/doc-2.0/yii-db-exception.html)
+>
+> ## SQLSTATE[22032]: <<Unknown error>>: 3141 Invalid JSON text in argument 1 to function json_contains: "The document is empty." at position 0. The SQL being executed was: SELECT * FROM `news` WHERE JSON_CONTAINS(category_id,'["2"]')
+
+数据库：
+
+<img src="../../image/Snipaste_2019-11-14_11-34-36.jpg" style="zoom:80%;" />
+
+
+
+部分示例：
+
+```php
+$model = new News();
+        $datas = $model::find()
+            ->where(['IS NOT', 'url', null])
+            ->andWhere(['AND', ['!=', 'category_id', ''], ['OR','JSON_CONTAINS(category_id,\'["2"]\')','JSON_CONTAINS(category_id,\'["3"]\')']])->all();
+// 生成的mysql：
+// SELECT * FROM `news` WHERE (`url` IS NOT NULL) AND ((`category_id` != '') AND ((JSON_CONTAINS(category_id,'["2"]')) OR (JSON_CONTAINS(category_id,'["3"]'))))
+```
+
+
+
+## Yii2 平时开发中的部分小技巧
+
+#### 查询
+
+`indexBy()`:  返回一个使用特定的字段或者表达式的值来作为索引结果集数组 。
+
+```php
+// 使用特定的字段
+$query = User::find()
+    ->select(['uid', 'name'])
+    ->indexBy('uid')
+    ->asArray()
+    ->all();
+
+/*
+{
+  "1001": {
+    "uid": "1001",
+    "name": "张三"
+  }...
+}
+*/
+
+//使用表达式的值
+$query = User::find()
+    ->select(['uid', 'name'])
+    ->indexBy(function ($row) {
+        return $row['uid'] . $row['name'];   // row中使用的字段名只能是查询返回的字段名
+    })
+    ->asArray()
+    ->all();
+
+/*
+{
+  "1001张三": {
+    "uid": "1001",
+    "name": "张三"
+  }...
+}
+*/
+```
+
+>  **注意点**：该方法从数据库取回数据后才生效执行的。 这意味着只能使用那些在你的 SELECT 查询中的列名。 此外，你用表名连接取列名的时候，比如 customer.id，结果中将只包含 id 列，因此你必须调用 ->indexBy(‘id’) 不要带表名前缀。 
+
+------
+
+`column()`：返回查询结果中的第一列的值
+
+```php
+$query = User::find()
+    ->select(['uid', 'name'])
+    ->column();
+
+/*
+[
+  "1001",
+  "1002",
+  ...
+]
+*/
+
+// 搭配indexBy()
+$query = User::find()
+    ->select(['uid', 'name'])
+    ->indexBy('uid')
+    ->column();
+
+/*
+{
+  "1001":"1001",
+  "1002":"1002",
+  ...
+}
+*/
+```
+
+
+
+------
+
+`asArray()`：以数组的形式返回每条记录
+
+```php
+// 单条
+$query = User::find()
+    ->select(['uid', 'name'])
+    ->asArray()
+    ->one();
+
+// 多条
+$query = User::find()
+    ->select(['uid', 'name'])
+    ->asArray()
+    ->all();
+```
+
+
+
+------
+
+`scalar()`：返回值的第一行第一列的查询结果
+
+```php
+
+// 多条
+$query = User::find()
+    ->select(['uid', 'name'])
+    ->scalar();
+
+/*
+"1001"
+*/
+```
+
+ 
